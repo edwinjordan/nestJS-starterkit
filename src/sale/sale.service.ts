@@ -5,6 +5,8 @@ import { Sale } from './sale.entity';
 import { SaleItem } from './sale-item.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ItemService } from '../item/item.service';
+import { RabbitMQService } from '../rabbitmq/rabbitmq.service';
+import { MessagePattern, SaleCreatedEvent, InventoryUpdatedEvent } from '../rabbitmq/rabbitmq.types';
 
 @Injectable()
 export class SaleService {
@@ -15,6 +17,7 @@ export class SaleService {
     private saleItemRepository: Repository<SaleItem>,
     private itemService: ItemService,
     private dataSource: DataSource,
+    private rabbitMQService: RabbitMQService,
   ) {}
 
   async create(createSaleDto: CreateSaleDto, userId: string): Promise<Sale> {
@@ -74,12 +77,53 @@ export class SaleService {
         await queryRunner.manager.save(saleItem);
 
         // Update stock
-        await this.itemService.updateStock(itemDto.itemId, -itemDto.quantity);
+        const updatedItem = await this.itemService.updateStock(itemDto.itemId, -itemDto.quantity);
+        
+        // Emit inventory updated event
+        await this.rabbitMQService.emit<InventoryUpdatedEvent>(MessagePattern.INVENTORY_UPDATED, {
+          itemId: updatedItem.id,
+          itemName: updatedItem.name,
+          itemCode: updatedItem.code,
+          previousStock: updatedItem.stock + itemDto.quantity,
+          currentStock: updatedItem.stock,
+          minStock: updatedItem.minStock,
+          updatedAt: new Date(),
+        });
+        
+        // Check for low stock and emit alert
+        if (updatedItem.stock <= updatedItem.minStock && updatedItem.stock > 0) {
+          await this.rabbitMQService.emit(MessagePattern.INVENTORY_LOW_STOCK, {
+            itemId: updatedItem.id,
+            itemName: updatedItem.name,
+            itemCode: updatedItem.code,
+            currentStock: updatedItem.stock,
+            minStock: updatedItem.minStock,
+            reorderLevel: updatedItem.minStock * 2,
+          });
+        }
       }
 
       await queryRunner.commitTransaction();
 
-      return this.findOne(savedSale.id);
+      const finalSale = await this.findOne(savedSale.id);
+      
+      // Emit sale created event
+      await this.rabbitMQService.emit<SaleCreatedEvent>(MessagePattern.SALE_CREATED, {
+        saleId: finalSale.id,
+        invoiceNumber: finalSale.invoiceNumber,
+        total: Number(finalSale.total),
+        customerName: finalSale.customerName,
+        customerEmail: undefined, // Add email field if needed
+        items: createSaleDto.items.map(item => ({
+          itemId: item.itemId,
+          itemName: item.itemName,
+          quantity: item.quantity,
+          price: item.price,
+        })),
+        createdAt: finalSale.createdAt,
+      });
+
+      return finalSale;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;

@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import databaseConfig from './config/database.config';
+import rabbitmqConfig from './config/rabbitmq.config';
 import { AuthModule } from './auth/auth.module';
 import { UserModule } from './user/user.module';
 import { RoleModule } from './role/role.module';
@@ -14,12 +15,14 @@ import { CategoryModule } from './category/category.module';
 import { UnitModule } from './unit/unit.module';
 import { ItemModule } from './item/item.module';
 import { SaleModule } from './sale/sale.module';
+import { RabbitMQModule } from './rabbitmq/rabbitmq.module';
+import { ConsumersModule } from './consumers/consumers.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig],
+      load: [databaseConfig, rabbitmqConfig],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -46,6 +49,8 @@ import { SaleModule } from './sale/sale.module';
     UnitModule,
     ItemModule,
     SaleModule,
+    RabbitMQModule,
+    ConsumersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
