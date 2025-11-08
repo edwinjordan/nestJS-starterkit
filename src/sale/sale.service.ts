@@ -7,6 +7,7 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { ItemService } from '../item/item.service';
 import { RabbitMQService } from '../rabbitmq/rabbitmq.service';
 import { MessagePattern, SaleCreatedEvent, InventoryUpdatedEvent } from '../rabbitmq/rabbitmq.types';
+import { PaginationDto, PaginatedResponseDto } from '../common';
 
 @Injectable()
 export class SaleService {
@@ -132,11 +133,37 @@ export class SaleService {
     }
   }
 
-  async findAll(): Promise<Sale[]> {
-    return this.saleRepository.find({
-      relations: ['user', 'branch', 'items', 'items.item'],
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(paginationDto: PaginationDto): Promise<PaginatedResponseDto<Sale>> {
+    const { page = 1, limit = 10, search, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+    
+    const skip = (page - 1) * limit;
+    
+    const queryBuilder = this.saleRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.user', 'user')
+      .leftJoinAndSelect('sale.branch', 'branch')
+      .leftJoinAndSelect('sale.items', 'items')
+      .leftJoinAndSelect('items.item', 'item');
+    
+    // Search
+    if (search) {
+      queryBuilder.where(
+        '(sale.invoiceNumber ILIKE :search OR sale.customerName ILIKE :search OR sale.customerPhone ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+    
+    // Sorting
+    const allowedSortFields = ['invoiceNumber', 'total', 'saleDate', 'createdAt', 'updatedAt'];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    queryBuilder.orderBy(`sale.${sortField}`, sortOrder);
+    
+    // Pagination
+    queryBuilder.skip(skip).take(limit);
+    
+    const [data, total] = await queryBuilder.getManyAndCount();
+    
+    return new PaginatedResponseDto(data, total, page, limit);
   }
 
   async findOne(id: string): Promise<Sale> {

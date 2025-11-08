@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { PermissionService } from './permission.service';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { PaginationDto } from '../common';
 
 @Controller('permissions')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -19,8 +20,8 @@ export class PermissionController {
 
   @Get()
   @Permissions('permission.read')
-  findAll() {
-    return this.permissionService.findAll();
+  findAll(@Query() paginationDto: PaginationDto) {
+    return this.permissionService.findAll(paginationDto);
   }
 
   @Get(':id')

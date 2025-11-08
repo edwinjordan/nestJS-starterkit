@@ -7,6 +7,7 @@ import { Sale } from './sale.entity';
 import { SaleItem } from './sale-item.entity';
 import { ItemService } from '../item/item.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { RabbitMQService } from '../rabbitmq/rabbitmq.service';
 
 describe('SaleService', () => {
   let service: SaleService;
@@ -65,6 +66,7 @@ describe('SaleService', () => {
     save: jest.fn(),
     find: jest.fn(),
     findOne: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
 
   const mockSaleItemRepository = {
@@ -79,6 +81,10 @@ describe('SaleService', () => {
 
   const mockDataSource = {
     createQueryRunner: jest.fn(() => mockQueryRunner),
+  };
+
+  const mockRabbitMQService = {
+    emit: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -100,6 +106,10 @@ describe('SaleService', () => {
         {
           provide: DataSource,
           useValue: mockDataSource,
+        },
+        {
+          provide: RabbitMQService,
+          useValue: mockRabbitMQService,
         },
       ],
     }).compile();
@@ -238,17 +248,39 @@ describe('SaleService', () => {
   });
 
   describe('findAll', () => {
-    it('should return an array of sales', async () => {
+    it('should return paginated sales', async () => {
       const sales = [mockSale];
-      mockSaleRepository.find.mockResolvedValue(sales);
+      const total = 1;
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([sales, total]),
+      };
+      
+      mockSaleRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      const result = await service.findAll();
+      const paginationDto = { page: 1, limit: 10 };
+      const result = await service.findAll(paginationDto);
 
-      expect(saleRepository.find).toHaveBeenCalledWith({
-        relations: ['user', 'branch', 'items', 'items.item'],
-        order: { createdAt: 'DESC' },
+      expect(saleRepository.createQueryBuilder).toHaveBeenCalledWith('sale');
+      expect(mockQueryBuilder.leftJoinAndSelect).toHaveBeenCalledWith('sale.user', 'user');
+      expect(mockQueryBuilder.leftJoinAndSelect).toHaveBeenCalledWith('sale.branch', 'branch');
+      expect(mockQueryBuilder.leftJoinAndSelect).toHaveBeenCalledWith('sale.items', 'items');
+      expect(mockQueryBuilder.leftJoinAndSelect).toHaveBeenCalledWith('items.item', 'item');
+      expect(result).toEqual({
+        data: sales,
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
       });
-      expect(result).toEqual(sales);
     });
   });
 

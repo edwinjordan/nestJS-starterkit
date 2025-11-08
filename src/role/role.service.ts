@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Like } from 'typeorm';
 import { Role } from './role.entity';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { Permission } from '../permission/permission.entity';
+import { PaginationDto, PaginatedResponseDto } from '../common';
 
 @Injectable()
 export class RoleService {
@@ -33,8 +34,34 @@ export class RoleService {
     return this.roleRepository.save(role);
   }
 
-  async findAll(): Promise<Role[]> {
-    return this.roleRepository.find({ relations: ['permissions'] });
+  async findAll(paginationDto: PaginationDto): Promise<PaginatedResponseDto<Role>> {
+    const { page = 1, limit = 10, search, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+    
+    const skip = (page - 1) * limit;
+    
+    const queryBuilder = this.roleRepository
+      .createQueryBuilder('role')
+      .leftJoinAndSelect('role.permissions', 'permissions');
+    
+    // Search
+    if (search) {
+      queryBuilder.where(
+        '(role.name ILIKE :search OR role.description ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+    
+    // Sorting
+    const allowedSortFields = ['name', 'createdAt', 'updatedAt'];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    queryBuilder.orderBy(`role.${sortField}`, sortOrder);
+    
+    // Pagination
+    queryBuilder.skip(skip).take(limit);
+    
+    const [data, total] = await queryBuilder.getManyAndCount();
+    
+    return new PaginatedResponseDto(data, total, page, limit);
   }
 
   async findOne(id: string): Promise<Role> {

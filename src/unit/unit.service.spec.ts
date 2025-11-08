@@ -26,6 +26,7 @@ describe('UnitService', () => {
     find: jest.fn(),
     findOne: jest.fn(),
     remove: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -72,14 +73,34 @@ describe('UnitService', () => {
   });
 
   describe('findAll', () => {
-    it('should return an array of units', async () => {
+    it('should return paginated units', async () => {
       const units = [mockUnit];
-      mockUnitRepository.find.mockResolvedValue(units);
+      const total = 1;
+      const mockQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([units, total]),
+      };
+      
+      mockUnitRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      const result = await service.findAll();
+      const paginationDto = { page: 1, limit: 10 };
+      const result = await service.findAll(paginationDto);
 
-      expect(repository.find).toHaveBeenCalled();
-      expect(result).toEqual(units);
+      expect(repository.createQueryBuilder).toHaveBeenCalledWith('unit');
+      expect(result).toEqual({
+        data: units,
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      });
     });
   });
 

@@ -26,6 +26,7 @@ describe('CategoryService', () => {
     find: jest.fn(),
     findOne: jest.fn(),
     remove: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -72,14 +73,34 @@ describe('CategoryService', () => {
   });
 
   describe('findAll', () => {
-    it('should return an array of categories', async () => {
+    it('should return paginated categories', async () => {
       const categories = [mockCategory];
-      mockCategoryRepository.find.mockResolvedValue(categories);
+      const total = 1;
+      const mockQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([categories, total]),
+      };
+      
+      mockCategoryRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      const result = await service.findAll();
+      const paginationDto = { page: 1, limit: 10 };
+      const result = await service.findAll(paginationDto);
 
-      expect(repository.find).toHaveBeenCalled();
-      expect(result).toEqual(categories);
+      expect(repository.createQueryBuilder).toHaveBeenCalledWith('category');
+      expect(result).toEqual({
+        data: categories,
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      });
     });
   });
 
