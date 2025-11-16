@@ -5,6 +5,9 @@ import { Sale } from './sale.entity';
 import { SaleItem } from './sale-item.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ItemService } from '../item/item.service';
+import { RabbitMQService } from '../rabbitmq/rabbitmq.service';
+import { MessagePattern, SaleCreatedEvent, InventoryUpdatedEvent } from '../rabbitmq/rabbitmq.types';
+import { PaginationDto, PaginatedResponseDto } from '../common';
 
 @Injectable()
 export class SaleService {
@@ -15,6 +18,7 @@ export class SaleService {
     private saleItemRepository: Repository<SaleItem>,
     private itemService: ItemService,
     private dataSource: DataSource,
+    private rabbitMQService: RabbitMQService,
   ) {}
 
   async create(createSaleDto: CreateSaleDto, userId: string): Promise<Sale> {
@@ -74,12 +78,53 @@ export class SaleService {
         await queryRunner.manager.save(saleItem);
 
         // Update stock
-        await this.itemService.updateStock(itemDto.itemId, -itemDto.quantity);
+        const updatedItem = await this.itemService.updateStock(itemDto.itemId, -itemDto.quantity);
+        
+        // Emit inventory updated event
+        await this.rabbitMQService.emit<InventoryUpdatedEvent>(MessagePattern.INVENTORY_UPDATED, {
+          itemId: updatedItem.id,
+          itemName: updatedItem.name,
+          itemCode: updatedItem.code,
+          previousStock: updatedItem.stock + itemDto.quantity,
+          currentStock: updatedItem.stock,
+          minStock: updatedItem.minStock,
+          updatedAt: new Date(),
+        });
+        
+        // Check for low stock and emit alert
+        if (updatedItem.stock <= updatedItem.minStock && updatedItem.stock > 0) {
+          await this.rabbitMQService.emit(MessagePattern.INVENTORY_LOW_STOCK, {
+            itemId: updatedItem.id,
+            itemName: updatedItem.name,
+            itemCode: updatedItem.code,
+            currentStock: updatedItem.stock,
+            minStock: updatedItem.minStock,
+            reorderLevel: updatedItem.minStock * 2,
+          });
+        }
       }
 
       await queryRunner.commitTransaction();
 
-      return this.findOne(savedSale.id);
+      const finalSale = await this.findOne(savedSale.id);
+      
+      // Emit sale created event
+      await this.rabbitMQService.emit<SaleCreatedEvent>(MessagePattern.SALE_CREATED, {
+        saleId: finalSale.id,
+        invoiceNumber: finalSale.invoiceNumber,
+        total: Number(finalSale.total),
+        customerName: finalSale.customerName,
+        customerEmail: undefined, // Add email field if needed
+        items: createSaleDto.items.map(item => ({
+          itemId: item.itemId,
+          itemName: item.itemName,
+          quantity: item.quantity,
+          price: item.price,
+        })),
+        createdAt: finalSale.createdAt,
+      });
+
+      return finalSale;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -88,11 +133,37 @@ export class SaleService {
     }
   }
 
-  async findAll(): Promise<Sale[]> {
-    return this.saleRepository.find({
-      relations: ['user', 'branch', 'items', 'items.item'],
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(paginationDto: PaginationDto): Promise<PaginatedResponseDto<Sale>> {
+    const { page = 1, limit = 10, search, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+    
+    const skip = (page - 1) * limit;
+    
+    const queryBuilder = this.saleRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.user', 'user')
+      .leftJoinAndSelect('sale.branch', 'branch')
+      .leftJoinAndSelect('sale.items', 'items')
+      .leftJoinAndSelect('items.item', 'item');
+    
+    // Search
+    if (search) {
+      queryBuilder.where(
+        '(sale.invoiceNumber ILIKE :search OR sale.customerName ILIKE :search OR sale.customerPhone ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+    
+    // Sorting
+    const allowedSortFields = ['invoiceNumber', 'total', 'saleDate', 'createdAt', 'updatedAt'];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    queryBuilder.orderBy(`sale.${sortField}`, sortOrder);
+    
+    // Pagination
+    queryBuilder.skip(skip).take(limit);
+    
+    const [data, total] = await queryBuilder.getManyAndCount();
+    
+    return new PaginatedResponseDto(data, total, page, limit);
   }
 
   async findOne(id: string): Promise<Sale> {

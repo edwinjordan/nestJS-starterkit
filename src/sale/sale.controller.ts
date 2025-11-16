@@ -4,6 +4,7 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { PaginationDto } from '../common';
 
 @Controller('sales')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -18,8 +19,8 @@ export class SaleController {
 
   @Get()
   @Permissions('sale.read')
-  findAll() {
-    return this.saleService.findAll();
+  findAll(@Query() paginationDto: PaginationDto) {
+    return this.saleService.findAll(paginationDto);
   }
 
   @Get('invoice/:invoiceNumber')

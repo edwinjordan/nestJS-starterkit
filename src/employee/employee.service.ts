@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Employee } from './employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { PaginationDto, PaginatedResponseDto } from '../common';
 
 @Injectable()
 export class EmployeeService {
@@ -17,8 +18,34 @@ export class EmployeeService {
     return this.employeeRepository.save(employee);
   }
 
-  async findAll(): Promise<Employee[]> {
-    return this.employeeRepository.find({ relations: ['branch'] });
+  async findAll(paginationDto: PaginationDto): Promise<PaginatedResponseDto<Employee>> {
+    const { page = 1, limit = 10, search, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+    
+    const skip = (page - 1) * limit;
+    
+    const queryBuilder = this.employeeRepository
+      .createQueryBuilder('employee')
+      .leftJoinAndSelect('employee.branch', 'branch');
+    
+    // Search
+    if (search) {
+      queryBuilder.where(
+        '(employee.name ILIKE :search OR employee.email ILIKE :search OR employee.phone ILIKE :search OR employee.position ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+    
+    // Sorting
+    const allowedSortFields = ['name', 'position', 'createdAt', 'updatedAt'];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    queryBuilder.orderBy(`employee.${sortField}`, sortOrder);
+    
+    // Pagination
+    queryBuilder.skip(skip).take(limit);
+    
+    const [data, total] = await queryBuilder.getManyAndCount();
+    
+    return new PaginatedResponseDto(data, total, page, limit);
   }
 
   async findOne(id: string): Promise<Employee> {

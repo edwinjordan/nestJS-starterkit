@@ -35,6 +35,7 @@ describe('ItemService', () => {
     find: jest.fn(),
     findOne: jest.fn(),
     remove: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -88,16 +89,37 @@ describe('ItemService', () => {
   });
 
   describe('findAll', () => {
-    it('should return an array of items with relations', async () => {
+    it('should return paginated items with relations', async () => {
       const items = [mockItem];
-      mockItemRepository.find.mockResolvedValue(items);
+      const total = 1;
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([items, total]),
+      };
+      
+      mockItemRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      const result = await service.findAll();
+      const paginationDto = { page: 1, limit: 10 };
+      const result = await service.findAll(paginationDto);
 
-      expect(repository.find).toHaveBeenCalledWith({
-        relations: ['category', 'unit'],
+      expect(repository.createQueryBuilder).toHaveBeenCalledWith('item');
+      expect(mockQueryBuilder.leftJoinAndSelect).toHaveBeenCalledWith('item.category', 'category');
+      expect(mockQueryBuilder.leftJoinAndSelect).toHaveBeenCalledWith('item.unit', 'unit');
+      expect(result).toEqual({
+        data: items,
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
       });
-      expect(result).toEqual(items);
     });
   });
 

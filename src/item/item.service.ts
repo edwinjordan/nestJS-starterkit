@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Item } from './item.entity';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
+import { PaginationDto, PaginatedResponseDto } from '../common';
 
 @Injectable()
 export class ItemService {
@@ -17,10 +18,35 @@ export class ItemService {
     return this.itemRepository.save(item);
   }
 
-  async findAll(): Promise<Item[]> {
-    return this.itemRepository.find({
-      relations: ['category', 'unit'],
-    });
+  async findAll(paginationDto: PaginationDto): Promise<PaginatedResponseDto<Item>> {
+    const { page = 1, limit = 10, search, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+    
+    const skip = (page - 1) * limit;
+    
+    const queryBuilder = this.itemRepository
+      .createQueryBuilder('item')
+      .leftJoinAndSelect('item.category', 'category')
+      .leftJoinAndSelect('item.unit', 'unit');
+    
+    // Search
+    if (search) {
+      queryBuilder.where(
+        '(item.name ILIKE :search OR item.code ILIKE :search OR item.barcode ILIKE :search OR category.name ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+    
+    // Sorting
+    const allowedSortFields = ['name', 'code', 'price', 'stock', 'createdAt', 'updatedAt'];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    queryBuilder.orderBy(`item.${sortField}`, sortOrder);
+    
+    // Pagination
+    queryBuilder.skip(skip).take(limit);
+    
+    const [data, total] = await queryBuilder.getManyAndCount();
+    
+    return new PaginatedResponseDto(data, total, page, limit);
   }
 
   async findOne(id: string): Promise<Item> {

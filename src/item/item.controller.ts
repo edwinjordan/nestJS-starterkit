@@ -5,6 +5,7 @@ import { UpdateItemDto } from './dto/update-item.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { PaginationDto } from '../common';
 
 @Controller('items')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -19,8 +20,8 @@ export class ItemController {
 
   @Get()
   @Permissions('item.read')
-  findAll() {
-    return this.itemService.findAll();
+  findAll(@Query() paginationDto: PaginationDto) {
+    return this.itemService.findAll(paginationDto);
   }
 
   @Get('barcode/:barcode')
